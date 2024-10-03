@@ -25,43 +25,28 @@ with st.sidebar:
 # Tabs
 tab1, tab2, tab3 = st.tabs(["Customer Analysis", "Geographic & Time Insights", "Product Insights"])
 
-# Helper functions
-def calculate_rfm(data):
-    """Calculate RFM (Recency, Frequency, Monetary) for customers."""
-    # Convert to datetime
-    data['order_approved_at'] = pd.to_datetime(data['order_approved_at'])
-    
-    # Recency: Difference between the last purchase and the end of the period (max date)
-    max_date = data['order_approved_at'].max()
-    rfm = data.groupby('customer_id').agg({
-        'order_approved_at': lambda x: (max_date - x.max()).days,  # Recency
-        'order_id': 'count',                                       # Frequency
-        'payment_value': 'sum'                                      # Monetary
-    }).reset_index()
-    
-    rfm.columns = ['customer_id', 'recency', 'frequency', 'monetary']
-    
-    # Handle cases where qcut may fail due to duplicates
-    rfm['R'] = pd.qcut(rfm['recency'], 4, labels=[4, 3, 2, 1], duplicates='drop')
-    rfm['F'] = pd.qcut(rfm['frequency'], 4, labels=[1, 2, 3, 4], duplicates='drop')
-    rfm['M'] = pd.qcut(rfm['monetary'], 4, labels=[1, 2, 3, 4], duplicates='drop')
-    
-    # Combine RFM scores into a single RFM Score column
-    rfm['RFM_Score'] = rfm['R'].astype(str) + rfm['F'].astype(str) + rfm['M'].astype(str)
-    
-    return rfm
+data['order_approved_at'] = pd.to_datetime(data['order_approved_at'])
+filtered_data = data[(data['order_approved_at'] >= pd.to_datetime(start_date)) & 
+                     (data['order_approved_at'] <= pd.to_datetime(end_date))]
 
-def calculate_monthly_sales(data):
-    """Calculate monthly sales growth."""
-    data['order_approved_at'] = pd.to_datetime(data['order_approved_at'])
-    data['month_year'] = data['order_approved_at'].dt.to_period('M')
+# Function for sales growth analysis
+def sales_growth(df, freq='D'):
+    # Ensure order_approved_at is in datetime format
+    df['order_approved_at'] = pd.to_datetime(df['order_approved_at'], errors='coerce')
     
-    monthly_sales = data.groupby('month_year').agg({
-        'payment_value': 'sum'
-    }).reset_index()
+    # Drop rows where the date conversion failed
+    df = df.dropna(subset=['order_approved_at'])
     
-    monthly_sales['sales_growth'] = monthly_sales['payment_value'].pct_change() * 100  # Percentage change
-    return monthly_sales
+    # Ensure payment_value is numeric and handle errors
+    df['payment_value'] = pd.to_numeric(df['payment_value'], errors='coerce')
+    
+    # Drop rows where payment_value conversion failed (i.e., non-numeric values)
+    df = df.dropna(subset=['payment_value'])
+    
+    # Resample by the frequency (D=Day, M=Month, Y=Year) and sum the payment_value
+    df = df.set_index('order_approved_at').resample(freq).sum(numeric_only=True)
+    
+    return df['payment_value']
 
 def daily_orders_overview(data):
     """Calculate daily orders overview."""
@@ -73,29 +58,16 @@ def daily_orders_overview(data):
 
 # Tab 1 Content
 with tab1:
-    st.header("RFM Analysis of Customers")
-    # RFM Analysis
-    rfm_data = calculate_rfm(data)
-    st.write(rfm_data.head())  # Show a preview of the RFM data
+    st.header("Sales Growth (Day, Month, Year)")
     
-    # Visualize RFM segments
-    st.subheader("RFM Segment Distribution")
-    fig, ax = plt.subplots()
-    sns.countplot(data=rfm_data, x='RFM_Score', ax=ax)
-    st.pyplot(fig)
+    sales_monthly = sales_growth(filtered_data, 'M')
+    sales_yearly = sales_growth(filtered_data, 'Y')
+    
+    st.subheader("Monthly Sales Growth")
+    st.line_chart(sales_monthly)
 
-    st.header("Monthly Sales Growth")
-    # Monthly Sales Growth
-    monthly_sales_data = calculate_monthly_sales(data)
-    st.write(monthly_sales_data)
-    
-    # Visualize Monthly Sales Growth
-    st.subheader("Sales Growth (Monthly)")
-    fig, ax = plt.subplots()
-    sns.lineplot(data=monthly_sales_data, x='month_year', y='sales_growth', ax=ax)
-    ax.set_xlabel('Month-Year')
-    ax.set_ylabel('Sales Growth (%)')
-    st.pyplot(fig)
+    st.subheader("Yearly Sales Growth")
+    st.line_chart(sales_yearly)
 
     st.header("Daily Orders Overview")
     # Daily Orders Overview
@@ -111,28 +83,85 @@ with tab1:
     st.pyplot(fig)
 
 # Tab 2: Geographic & Time Insights
+# Tab 2: Geographic & Time Insights
 with tab2:
     st.header("Customer 'Prime Time' and 'Dead Time'")
-    # Time analysis code here
-    st.write("Implement customer prime and dead time.")
+    
+    def analyze_prime_and_dead_time(data):
+        # Convert 'order_approved_at' to datetime
+        data['order_approved_at'] = pd.to_datetime(data['order_approved_at'])
+        
+        # Extract the hour from the order approval time
+        data['order_hour'] = data['order_approved_at'].dt.hour
+        
+        # Group by hour to find the count of orders for each hour
+        hourly_orders = data.groupby('order_hour').size()
+        
+        # Find prime time and dead time (e.g., most and least popular shopping hours)
+        prime_time = hourly_orders.idxmax()
+        dead_time = hourly_orders.idxmin()
+        
+        return hourly_orders, prime_time, dead_time
+    
+    # Analyze prime and dead times for shopping
+    hourly_orders, prime_time, dead_time = analyze_prime_and_dead_time(data)
+    
+    # Display the result
+    st.write(f"Prime Time: {prime_time}:00 (Highest Orders)")
+    st.write(f"Dead Time: {dead_time}:00 (Lowest Orders)")
+    
+    # Plot hourly orders to visualize prime and dead time
+    fig, ax = plt.subplots()
+    sns.lineplot(x=hourly_orders.index, y=hourly_orders.values, ax=ax)
+    ax.set_title('Orders by Hour of Day')
+    ax.set_xlabel('Hour of Day')
+    ax.set_ylabel('Number of Orders')
+    st.pyplot(fig)
 
     st.header("Customer and Seller Geolocation")
-    # Create a map using Folium
-    m = folium.Map(location=[-23.55, -46.63], zoom_start=4)
     
-    # Add customer and seller points from the dataset
-    for i, row in data.iterrows():
-        folium.Marker([row['geolocation_lat_customer'], row['geolocation_lng_customer']], 
-                      popup=f"Customer: {row['customer_city']}, {row['customer_state']}").add_to(m)
-        folium.Marker([row['geolocation_lat_seller'], row['geolocation_lng_seller']], 
-                      popup=f"Seller: {row['seller_city']}, {row['seller_state']}").add_to(m)
+    def create_geolocation_map(data):
+        # Create a Folium map centered at the average location of customers
+        avg_lat = data['geolocation_lat_customer'].mean()
+        avg_lng = data['geolocation_lng_customer'].mean()
+        m = folium.Map(location=[avg_lat, avg_lng], zoom_start=5)
+        
+        # Add customer locations as markers
+        for i, row in data.iterrows():
+            folium.Marker([row['geolocation_lat_customer'], row['geolocation_lng_customer']],
+                          popup=f"Customer: {row['customer_city']}, {row['customer_state']}").add_to(m)
+        
+        # Add seller locations as markers
+        for i, row in data.iterrows():
+            folium.Marker([row['geolocation_lat_seller'], row['geolocation_lng_seller']],
+                          popup=f"Seller: {row['seller_city']}, {row['seller_state']}").add_to(m)
+        
+        return m
+
+    # Generate the map with customer and seller geolocation data
+    geolocation_map = create_geolocation_map(data)
     
-    st_folium(m, width=700, height=500)
-    
+    # Display the map using Streamlit Folium integration
+    st_folium(geolocation_map, width=700, height=500)
+
     st.header("Payment Method by Customers")
-    # Payment method visualization code
-    payment_types = data['payment_type'].value_counts()
-    st.bar_chart(payment_types)
+    
+    def visualize_payment_methods(data):
+        # Count the number of occurrences of each payment method
+        payment_counts = data['payment_type'].value_counts()
+        
+        # Plot the payment method distribution
+        fig, ax = plt.subplots()
+        sns.barplot(x=payment_counts.index, y=payment_counts.values, ax=ax)
+        ax.set_title('Payment Method Distribution')
+        ax.set_xlabel('Payment Method')
+        ax.set_ylabel('Number of Transactions')
+        return fig
+    
+    # Display payment method distribution
+    payment_method_fig = visualize_payment_methods(data)
+    st.pyplot(payment_method_fig)
+
 
 # Tab 3: Product Insights
 with tab3:

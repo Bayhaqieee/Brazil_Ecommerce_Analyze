@@ -1,9 +1,9 @@
-streamlit==1.39.0
 pandas==2.2.3
-folium==0.17.0
-streamlit_folium==0.23.0
-folium.plugins
-matplotlib.pyplot
-seaborn
-babel.numbers
 datetime
+Babel==2.13.1
+folium==0.17.0
+matplotlib==3.7.1
+numpy<2
+pandas==2.2.3
+seaborn==0.13.2
+streamlit_folium==0.22.1

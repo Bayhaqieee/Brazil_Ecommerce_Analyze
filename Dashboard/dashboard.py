@@ -123,7 +123,7 @@ with tab2:
     
     def create_geolocation_map(data):
         # Limit the data to the first 1000 rows for performance
-        data = data.head(1000)
+        data = data.head(10000)
         
         # Create a Folium map centered at the average location of customers
         avg_lat = data['geolocation_lat_customer'].mean()
@@ -155,6 +155,7 @@ with tab2:
     
     # Display the map using Streamlit Folium integration
     st_folium(geolocation_map, width=700, height=500)
+    st.write(f"Only Display 10000 Customers Dataset")
 
     st.header("Payment Method by Customers")
     

@@ -3,6 +3,7 @@ import pandas as pd
 import folium
 from streamlit_folium import st_folium
 from folium.plugins import FastMarkerCluster
+from folium.plugins import MarkerCluster
 import matplotlib.pyplot as plt
 import seaborn as sns
 from babel.numbers import format_currency
@@ -121,20 +122,31 @@ with tab2:
     st.header("Customer and Seller Geolocation")
     
     def create_geolocation_map(data):
+        # Limit the data to the first 1000 rows for performance
+        data = data.head(1000)
+        
         # Create a Folium map centered at the average location of customers
         avg_lat = data['geolocation_lat_customer'].mean()
         avg_lng = data['geolocation_lng_customer'].mean()
         m = folium.Map(location=[avg_lat, avg_lng], zoom_start=5)
         
-        # Add customer locations as markers
-        for i, row in data.iterrows():
-            folium.Marker([row['geolocation_lat_customer'], row['geolocation_lng_customer']],
-                          popup=f"Customer: {row['customer_city']}, {row['customer_state']}").add_to(m)
+        # Initialize marker clusters for customers and sellers
+        customer_cluster = MarkerCluster().add_to(m)
+        seller_cluster = MarkerCluster().add_to(m)
         
-        # Add seller locations as markers
+        # Add customer locations to the customer cluster
         for i, row in data.iterrows():
-            folium.Marker([row['geolocation_lat_seller'], row['geolocation_lng_seller']],
-                          popup=f"Seller: {row['seller_city']}, {row['seller_state']}").add_to(m)
+            folium.Marker(
+                [row['geolocation_lat_customer'], row['geolocation_lng_customer']],
+                popup=f"Customer: {row['customer_city']}, {row['customer_state']}"
+            ).add_to(customer_cluster)
+        
+        # Add seller locations to the seller cluster
+        for i, row in data.iterrows():
+            folium.Marker(
+                [row['geolocation_lat_seller'], row['geolocation_lng_seller']],
+                popup=f"Seller: {row['seller_city']}, {row['seller_state']}"
+            ).add_to(seller_cluster)
         
         return m
 
@@ -166,14 +178,63 @@ with tab2:
 # Tab 3: Product Insights
 with tab3:
     st.header("Product Flow (Shipped to Delivered)")
-    # Product flow analysis code
-    st.write("Analyze product flow from shipping to delivery.")
+
+    def calculate_delivery_time(data):
+        # Convert the necessary columns to datetime
+        data['order_delivered_customer_date'] = pd.to_datetime(data['order_delivered_customer_date'], errors='coerce')
+        data['order_delivered_carrier_date'] = pd.to_datetime(data['order_delivered_carrier_date'], errors='coerce')
+        
+        # Calculate time from carrier shipping to customer delivery
+        data['shipping_to_delivery_days'] = (data['order_delivered_customer_date'] - 
+                                            data['order_delivered_carrier_date']).dt.days
+        return data
+
+    # Call the function and show the average delivery time
+    delivery_data = calculate_delivery_time(filtered_data)
+    avg_delivery_time = delivery_data['shipping_to_delivery_days'].mean()
+    
+    st.write(f"Average time from shipping to delivery: {avg_delivery_time:.2f} days")
+    
+    # Plot the distribution of shipping to delivery times
+    plt.figure(figsize=(10, 6))
+    sns.histplot(delivery_data['shipping_to_delivery_days'].dropna(), bins=20, kde=True)
+    plt.title("Distribution of Shipping to Delivery Times (in days)")
+    plt.xlabel("Days")
+    plt.ylabel("Frequency")
+    st.pyplot(plt)
 
     st.header("Best and Worst Performing Products")
-    # Performance analysis code
-    st.write("Show best and worst performing products.")
+
+    def calculate_product_performance(data):
+        # Group by product and calculate total sales and number of purchases
+        product_performance = data.groupby('product_category_name_english').agg(
+            total_sales=pd.NamedAgg(column='payment_value', aggfunc='sum'),
+            total_orders=pd.NamedAgg(column='order_id', aggfunc='count')
+        ).reset_index()
+        return product_performance
+
+    performance_data = calculate_product_performance(filtered_data)
+    
+    # Top 5 best performing products by total sales
+    best_products = performance_data.sort_values(by='total_sales', ascending=False).head(5)
+    st.subheader("Best Performing Products")
+    st.table(best_products[['product_category_name_english', 'total_sales']])
+    
+    # Top 5 worst performing products by number of orders
+    worst_products = performance_data.sort_values(by='total_orders', ascending=True).head(5)
+    st.subheader("Worst Performing Products")
+    st.table(worst_products[['product_category_name_english', 'total_orders']])
 
     st.header("Product Reviews")
-    # Product reviews analysis code
-    review_scores = data['review_score'].value_counts()
-    st.bar_chart(review_scores)
+
+    def visualize_review_scores(data):
+        # Visualize product reviews
+        review_counts = data['review_score'].value_counts().sort_index()
+        plt.figure(figsize=(10, 6))
+        sns.barplot(x=review_counts.index, y=review_counts.values, palette='viridis')
+        plt.title("Distribution of Product Review Scores")
+        plt.xlabel("Review Score")
+        plt.ylabel("Count")
+        st.pyplot(plt)
+
+    visualize_review_scores(filtered_data)

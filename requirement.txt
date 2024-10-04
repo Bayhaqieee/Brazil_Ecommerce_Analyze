@@ -1,0 +1,9 @@
+streamlit
+pandas
+folium
+streamlit_folium
+folium.plugins
+matplotlib.pyplot
+seaborn
+babel.numbers
+datetime

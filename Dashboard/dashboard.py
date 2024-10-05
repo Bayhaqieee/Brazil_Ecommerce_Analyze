@@ -2,11 +2,12 @@ import streamlit as st
 import pandas as pd
 import folium
 from streamlit_folium import st_folium
-from folium.plugins import FastMarkerCluster
 from folium.plugins import MarkerCluster
 import matplotlib.pyplot as plt
 import seaborn as sns
 from babel.numbers import format_currency
+import plotly.express as px
+import plotly.graph_objects as go
 
 # Load dataset
 data = pd.read_csv('Dashboard/combines_data.csv')
@@ -58,20 +59,17 @@ def daily_orders_overview(data):
     return daily_orders
 
 def plot_top_cities_by_purchase(data):
-    # Filter for successful orders (delivered)
-    successful_orders = data[data['order_delivered_customer_date'].notnull()]
-
     # Group by city and count the number of purchases
-    top_cities = successful_orders.groupby('customer_city').size().sort_values(ascending=False).head(10)
-
-    # Create a plot
-    fig, ax = plt.subplots(figsize=(12, 6))
-    sns.barplot(x=top_cities.index, y=top_cities.values, palette='rocket', ax=ax)
-    ax.set_title('Top 10 Cities with Highest Purchase Activity')
-    ax.set_xlabel('Cities')
-    ax.set_ylabel('Number of Purchases')
-    plt.xticks(rotation=45)
+    top_cities = data.groupby('customer_city').size().reset_index(name='Number of Purchases')
+    top_cities = top_cities.sort_values(by='Number of Purchases', ascending=False).head(10)
     
+    # Create an interactive bar chart
+    fig = px.bar(top_cities, x='customer_city', y='Number of Purchases', 
+                 title='Top 10 Cities with Highest Purchase Activity',
+                 labels={'customer_city': 'City', 'Number of Purchases': 'Number of Purchases'},
+                 color='Number of Purchases', 
+                 color_continuous_scale=px.colors.sequential.Rainbow)
+
     return fig
 
 def create_geolocation_map_customer(data):
@@ -139,44 +137,66 @@ def calculate_top_sellers(data):
     
     return top_seller
 
-def analyze_delivery_efficiency(data):
+def calculate_monthly_growth(data):
     # Convert to datetime if not already
-    data['order_purchase_timestamp'] = pd.to_datetime(data['order_approved_at'])
-    data['order_delivered_customer_date'] = pd.to_datetime(data['order_delivered_customer_date'])
+    data['order_purchase_timestamp'] = pd.to_datetime(data['order_purchase_timestamp'])
+    data['purchase_month'] = data['order_purchase_timestamp'].dt.to_period('M')
+    
+    # Group by month and count the number of orders
+    purchase_growth = data.groupby('purchase_month').size()
+
+    # Calculate the overall percentage growth or decline
+    initial_orders = purchase_growth.iloc[0]  # Orders in the first month
+    final_orders = purchase_growth.iloc[-1]    # Orders in the last month
+
+    overall_percentage_change = ((final_orders - initial_orders) / initial_orders) * 100
+    
+    return purchase_growth, overall_percentage_change
+
+def analyze_delivery_efficiency(data):
+    # Ensure the correct columns are in the dataset
+    if 'order_approved_at' not in data.columns or 'order_delivered_customer_date' not in data.columns:
+        raise ValueError("Data must contain 'order_approved_at' and 'order_delivered_customer_date' columns.")
+
+    # Convert to datetime if not already
+    data['order_purchase_timestamp'] = pd.to_datetime(data['order_approved_at'], errors='coerce')
+    data['order_delivered_customer_date'] = pd.to_datetime(data['order_delivered_customer_date'], errors='coerce')
 
     # Filter for delivered orders and calculate the time taken
-    delivered_orders = data[data['order_status'] == 'delivered']
-    delivered_orders['delivery_duration'] = (delivered_orders['order_delivered_customer_date'] - delivered_orders['order_purchase_timestamp']).dt.days
+    data['delivery_duration'] = (data['order_delivered_customer_date'] - data['order_purchase_timestamp']).dt.days
+
+    # Filter out any rows with NaT in delivery_duration
+    data = data[data['delivery_duration'].notna()]
 
     # Summary statistics on delivery time
-    delivery_summary = delivered_orders['delivery_duration'].describe()
+    delivery_summary = data['delivery_duration'].describe()
 
     # Calculate min and max delivery durations
-    min_delivery_time = delivered_orders['delivery_duration'].min()
-    max_delivery_time = delivered_orders['delivery_duration'].max()
+    min_delivery_time = delivery_summary['min']
+    max_delivery_time = delivery_summary['max']
 
-    # Define efficiency thresholds (close to minimum is considered efficient)
+    # Define efficiency thresholds
     threshold_min = min_delivery_time + (max_delivery_time - min_delivery_time) * 0.25  # Top 25% efficient
     threshold_max = max_delivery_time - (max_delivery_time - min_delivery_time) * 0.25  # Bottom 25% inefficient
 
     # Count the number of deliveries in each efficiency category
-    efficient_deliveries = delivered_orders[delivered_orders['delivery_duration'] <= threshold_min].shape[0]
-    inefficient_deliveries = delivered_orders[delivered_orders['delivery_duration'] >= threshold_max].shape[0]
-    total_deliveries = delivered_orders.shape[0]
+    efficient_deliveries = data[data['delivery_duration'] <= threshold_min].shape[0]
+    inefficient_deliveries = data[data['delivery_duration'] >= threshold_max].shape[0]
+    total_deliveries = data.shape[0]
 
     # Calculate the efficiency percentages for efficient and inefficient deliveries
-    efficient_percentage = (efficient_deliveries / total_deliveries) * 100
-    inefficient_percentage = (inefficient_deliveries / total_deliveries) * 100
+    efficient_percentage = (efficient_deliveries / total_deliveries) * 100 if total_deliveries > 0 else 0
+    inefficient_percentage = (inefficient_deliveries / total_deliveries) * 100 if total_deliveries > 0 else 0
 
     # General efficiency rates based on average delivery time
     average_delivery_time = delivery_summary['mean']
-    general_efficient_deliveries = delivered_orders[delivered_orders['delivery_duration'] <= average_delivery_time].shape[0]
-    general_inefficient_deliveries = delivered_orders[delivered_orders['delivery_duration'] > average_delivery_time].shape[0]
+    general_efficient_deliveries = data[data['delivery_duration'] <= average_delivery_time].shape[0]
+    general_inefficient_deliveries = data[data['delivery_duration'] > average_delivery_time].shape[0]
 
     # Calculate the general efficiency percentages
-    general_efficient_percentage = (general_efficient_deliveries / total_deliveries) * 100
-    general_inefficient_percentage = (general_inefficient_deliveries / total_deliveries) * 100
-    
+    general_efficient_percentage = (general_efficient_deliveries / total_deliveries) * 100 if total_deliveries > 0 else 0
+    general_inefficient_percentage = (general_inefficient_deliveries / total_deliveries) * 100 if total_deliveries > 0 else 0
+
     return {
         "total_deliveries": total_deliveries,
         "efficient_deliveries": efficient_deliveries,
@@ -193,29 +213,24 @@ with tab1:
     st.subheader('Top 10 Cities with Highest Purchase Activity')
 
     # Call the function and display the plot in Streamlit
-    fig = plot_top_cities_by_purchase(data)
-    st.pyplot(fig)
-    
-    st.subheader("Customer Geolocation")
-    # Generate the map with customer and seller geolocation data
-    geolocation_map_customer = create_geolocation_map_customer(data)
-    
-    # Display the map using Streamlit Folium integration
-    st_folium(geolocation_map_customer, width=700, height=500)
-    st.write(f"Only Display 5000 Customers Dataset")
+    fig_cities = plot_top_cities_by_purchase(data)
+    st.plotly_chart(fig_cities)
     
     st.header('Top Product and Top Seller in Our E-Commerce')
     st.subheader('Top 5 Product')
     
-    # Top 5 best-performing products by total sales
     best_products = performance_data.sort_values(by='total_sales', ascending=False).head(5)
-    fig, ax = plt.subplots()
-
-    # Create pie chart
-    ax.pie(best_products['total_sales'], labels=best_products['product_category_name_english'], autopct='%1.1f%%', startangle=90, colors=['#ff9999','#66b3ff','#99ff99','#ffcc99','#c2c2f0'])
-    ax.axis('equal')
-    st.pyplot(fig)
-    
+    total_sales_all = performance_data['total_sales'].sum()
+    total_sales_best = best_products['total_sales'].sum()
+    total_sales_other = total_sales_all - total_sales_best
+    pie_data = pd.DataFrame({
+        'Category': list(best_products['product_category_name_english']) + ['Other'],
+        'Sales': list(best_products['total_sales']) + [total_sales_other]
+    })
+    fig = px.pie(pie_data, names='Category', values='Sales',
+                title='Top 5 Best-Performing Products vs Other Products',
+                hole=0.3)  # This creates a donut chart
+    st.plotly_chart(fig)
     st.subheader("Top 10 Sellers by Total Sales")
 
     top_sellers = calculate_top_sellers(data)
@@ -223,50 +238,41 @@ with tab1:
     # Display results in Streamlit
     st.subheader("Top 10 Sellers")
     st.table(top_sellers)
-
-    # Optional: Visualizing total sales of top sellers
-    fig, ax = plt.subplots()
-    ax.bar(top_sellers['seller_id'].astype(str), top_sellers['total_sales'], color='skyblue')
-    ax.set_xlabel('Seller ID')
-    ax.set_ylabel('Total Sales')
-    ax.set_title('Top 10 Sellers by Total Sales')
-    plt.xticks(rotation=45)
-    
-    st.pyplot(fig)
     
     st.header('Product Shipment Flow Effectivity')
-    # Analyze delivery efficiency
     analysis_results = analyze_delivery_efficiency(data)
 
     # Display results in Streamlit
     st.subheader("Delivery Efficiency Summary")
     st.write(f"Total Deliveries: {analysis_results['total_deliveries']}")
-    st.write(f"Efficient Deliveries: {analysis_results['efficient_deliveries']} ({analysis_results['efficient_percentage']:.2f}%)")
-    st.write(f"Inefficient Deliveries: {analysis_results['inefficient_deliveries']} ({analysis_results['inefficient_percentage']:.2f}%)")
     st.write(f"General Efficient Deliveries: {analysis_results['general_efficient_percentage']:.2f}%")
     st.write(f"General Inefficient Deliveries: {analysis_results['general_inefficient_percentage']:.2f}%")
 
     # Optional: Visualizing delivery efficiency
     labels = ['Efficient Deliveries', 'Inefficient Deliveries']
-    sizes = [analysis_results['efficient_percentage'], analysis_results['inefficient_percentage']]
-    
-    fig, ax = plt.subplots()
-    ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, colors=['#66c2a5', '#fc8d62'])
-    ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
-    
-    st.pyplot(fig)
-    
+    sizes = [analysis_results['general_efficient_percentage'], analysis_results['general_inefficient_percentage']]
+
+    # Create an interactive pie chart for delivery efficiency
+    fig_efficiency = go.Figure(data=[go.Pie(labels=labels, values=sizes, hole=.3,
+                                            marker=dict(colors=['#66c2a5', '#fc8d62']),
+                                            textinfo='percent+label')])
+    fig_efficiency.update_layout(title_text='Delivery Efficiency Summary')
+    st.plotly_chart(fig_efficiency)
+
     st.header('Most Payment Method Used')
     payment_methods = data.groupby('payment_type').size().sort_values(ascending=False)
 
-    # Create pie chart
-    fig, ax = plt.subplots()
+    # Create an interactive pie chart for payment methods
     explode = [0.1 if i == payment_methods.idxmax() else 0 for i in payment_methods.index]
 
-    # Plot pie chart
-    ax.pie(payment_methods, labels=payment_methods.index, autopct='%1.1f%%', explode=explode, startangle=90, colors=plt.cm.tab20.colors)
-    ax.axis('equal')
-    plt.show()
+    fig_payment = go.Figure(data=[go.Pie(labels=payment_methods.index, 
+                                        values=payment_methods,
+                                        explode=explode,
+                                        hole=.3,
+                                        marker=dict(colors=plt.cm.tab20.colors),
+                                        textinfo='percent+label')])
+    fig_payment.update_layout(title_text='Most Used Payment Methods')
+    st.plotly_chart(fig_payment)
     
     st.header('Customer Prime and Dead Time')
     # Convert to datetime if not already
@@ -305,6 +311,37 @@ with tab1:
     st.subheader('Purchase Activity Insights')
     st.write(f"**Prime Time:** {prime_time_hour}:00 with {prime_time_count} purchases.")
     st.write(f"**Dead Time:** {dead_time_hour}:00 with {dead_time_count} purchases.")
+    
+    purchase_growth, overall_percentage_change = calculate_monthly_growth(data)
+
+    # Set up the Streamlit app
+    st.header('Monthly Purchase Growth Analysis')
+
+    # Plotting purchase growth over time
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sns.lineplot(x=purchase_growth.index.astype(str), y=purchase_growth.values, marker='o', ax=ax)
+    ax.set_title('Growth of Purchases Over Time')
+    ax.set_xlabel('Month')
+    ax.set_ylabel('Number of Purchases')
+
+    # Set x-ticks and rotation
+    ax.set_xticks(range(len(purchase_growth.index)))  # Set positions for ticks
+    ax.set_xticklabels(purchase_growth.index.astype(str), rotation=45)  # Set the labels with rotation
+
+    ax.grid()
+
+    # Show the plot in Streamlit
+    st.pyplot(fig)
+
+    # Display overall purchase growth
+    st.subheader('Overall Purchase Growth')
+    st.write(f"**Overall Purchase Growth from first to last month:** {overall_percentage_change:.2f}%")
+
+    st.subheader("Customer Geolocation")
+    # Generate the map with customer and seller geolocation data
+    geolocation_map_customer = create_geolocation_map_customer(data)
+    st.write("Here is the customer geolocation map:")
+    st_folium(geolocation_map_customer, width=700, height=500)
     
 
 # Tab 2 Content

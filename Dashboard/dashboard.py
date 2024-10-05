@@ -24,7 +24,7 @@ with st.sidebar:
     )
 
 # Tabs
-tab1, tab2, tab3 = st.tabs(["Customer Analysis", "Geographic & Time Insights", "Product Insights"])
+tab1, tab2, tab3, tab4 = st.tabs(["Data Conclusion","Customer Analysis", "Geographic & Time Insights", "Product Insights"])
 
 data['order_approved_at'] = pd.to_datetime(data['order_approved_at'])
 filtered_data = data[(data['order_approved_at'] >= pd.to_datetime(start_date)) & 
@@ -57,8 +57,138 @@ def daily_orders_overview(data):
     }).reset_index()
     return daily_orders
 
-# Tab 1 Content
+def plot_top_cities_by_purchase(data):
+    # Filter for successful orders (delivered)
+    successful_orders = data[data['order_delivered_customer_date'].notnull()]
+
+    # Group by city and count the number of purchases
+    top_cities = successful_orders.groupby('customer_city').size().sort_values(ascending=False).head(10)
+
+    # Create a plot
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sns.barplot(x=top_cities.index, y=top_cities.values, palette='rocket', ax=ax)
+    ax.set_title('Top 10 Cities with Highest Purchase Activity')
+    ax.set_xlabel('Cities')
+    ax.set_ylabel('Number of Purchases')
+    plt.xticks(rotation=45)
+    
+    return fig
+
+def create_geolocation_map_customer(data):
+    # Limit the data to the first 1000 rows for performance
+    data = data.head(5000)
+    
+    # Create a Folium map centered at the average location of customers
+    avg_lat = data['geolocation_lat_customer'].mean()
+    avg_lng = data['geolocation_lng_customer'].mean()
+    m = folium.Map(location=[avg_lat, avg_lng], zoom_start=5)
+    
+    # Initialize marker clusters for customers and sellers
+    customer_cluster = MarkerCluster().add_to(m)
+    
+    # Add customer locations to the customer cluster
+    for i, row in data.iterrows():
+        folium.Marker(
+            [row['geolocation_lat_customer'], row['geolocation_lng_customer']],
+            popup=f"Customer: {row['customer_city']}, {row['customer_state']}"
+        ).add_to(customer_cluster)
+        
+    return m
+
+def create_geolocation_map_seller(data):
+    # Limit the data to the first 1000 rows for performance
+    data = data.head(5000)
+    
+    # Create a Folium map centered at the average location of customers
+    avg_lat = data['geolocation_lat_customer'].mean()
+    avg_lng = data['geolocation_lng_customer'].mean()
+    m = folium.Map(location=[avg_lat, avg_lng], zoom_start=5)
+    
+    # Initialize marker clusters for customers and sellers
+    seller_cluster = MarkerCluster().add_to(m)
+    
+    # Add seller locations to the seller cluster
+    for i, row in data.iterrows():
+        folium.Marker(
+            [row['geolocation_lat_seller'], row['geolocation_lng_seller']],
+            popup=f"Seller: {row['seller_city']}, {row['seller_state']}"
+        ).add_to(seller_cluster)
+    
+    return m
+    
+def calculate_product_performance(data):
+    # Group by product and calculate total sales and number of purchases
+    product_performance = data.groupby('product_category_name_english').agg(
+        total_sales=pd.NamedAgg(column='payment_value', aggfunc='sum'),
+        total_orders=pd.NamedAgg(column='order_id', aggfunc='count')
+    ).reset_index()
+    return product_performance
+
+performance_data = calculate_product_performance(filtered_data)
+
+def calculate_top_sellers(data):
+    # Calculate total sales per seller
+    top_sellers = data.groupby('seller_id').agg({'price': 'sum'}).reset_index()
+    top_sellers.columns = ['seller_id', 'total_sales']
+
+    # Merge to get seller cities and states
+    top_sellers = top_sellers.merge(data[['seller_id', 'seller_city', 'seller_state']], on='seller_id', how='left').drop_duplicates()
+
+    # Sort and select top 10 sellers
+    top_seller = top_sellers.sort_values(by='total_sales', ascending=False).head(10)
+    
+    return top_seller
+
 with tab1:
+    # Streamlit section to display the results
+    st.header('Highest Frequency on Buying Customer by City in our E-Commerce')
+    st.subheader('Top 10 Cities with Highest Purchase Activity')
+
+    # Call the function and display the plot in Streamlit
+    fig = plot_top_cities_by_purchase(data)
+    st.pyplot(fig)
+    
+    st.subheader("Customer Geolocation")
+    # Generate the map with customer and seller geolocation data
+    geolocation_map_customer = create_geolocation_map_customer(data)
+    
+    # Display the map using Streamlit Folium integration
+    st_folium(geolocation_map_customer, width=700, height=500)
+    st.write(f"Only Display 5000 Customers Dataset")
+    
+    st.header('Top Product and Top Seller in Our E-Commerce')
+    st.subheader('Top 5 Product')
+    
+    # Top 5 best-performing products by total sales
+    best_products = performance_data.sort_values(by='total_sales', ascending=False).head(5)
+    fig, ax = plt.subplots()
+
+    # Create pie chart
+    ax.pie(best_products['total_sales'], labels=best_products['product_category_name_english'], autopct='%1.1f%%', startangle=90, colors=['#ff9999','#66b3ff','#99ff99','#ffcc99','#c2c2f0'])
+    ax.axis('equal')
+    st.pyplot(fig)
+    
+    st.subheader("Top 10 Sellers by Total Sales")
+
+    top_sellers = calculate_top_sellers(data)
+
+    # Display results in Streamlit
+    st.subheader("Top 10 Sellers")
+    st.table(top_sellers)
+
+    # Optional: Visualizing total sales of top sellers
+    fig, ax = plt.subplots()
+    ax.bar(top_sellers['seller_id'].astype(str), top_sellers['total_sales'], color='skyblue')
+    ax.set_xlabel('Seller ID')
+    ax.set_ylabel('Total Sales')
+    ax.set_title('Top 10 Sellers by Total Sales')
+    plt.xticks(rotation=45)
+    
+    st.pyplot(fig)
+    
+
+# Tab 2 Content
+with tab2:
     st.header("Sales Growth (Day, Month, Year)")
     
     sales_monthly = sales_growth(filtered_data, 'M')
@@ -83,9 +213,8 @@ with tab1:
     ax.set_ylabel('Number of Orders')
     st.pyplot(fig)
 
-# Tab 2: Geographic & Time Insights
-# Tab 2: Geographic & Time Insights
-with tab2:
+# Tab 3 : Geographic & Time Insights
+with tab3:
     st.header("Customer 'Prime Time' and 'Dead Time'")
     
     def analyze_prime_and_dead_time(data):
@@ -120,42 +249,20 @@ with tab2:
     st.pyplot(fig)
 
     st.header("Customer and Seller Geolocation")
-    
-    def create_geolocation_map(data):
-        # Limit the data to the first 1000 rows for performance
-        data = data.head(10000)
-        
-        # Create a Folium map centered at the average location of customers
-        avg_lat = data['geolocation_lat_customer'].mean()
-        avg_lng = data['geolocation_lng_customer'].mean()
-        m = folium.Map(location=[avg_lat, avg_lng], zoom_start=5)
-        
-        # Initialize marker clusters for customers and sellers
-        customer_cluster = MarkerCluster().add_to(m)
-        seller_cluster = MarkerCluster().add_to(m)
-        
-        # Add customer locations to the customer cluster
-        for i, row in data.iterrows():
-            folium.Marker(
-                [row['geolocation_lat_customer'], row['geolocation_lng_customer']],
-                popup=f"Customer: {row['customer_city']}, {row['customer_state']}"
-            ).add_to(customer_cluster)
-        
-        # Add seller locations to the seller cluster
-        for i, row in data.iterrows():
-            folium.Marker(
-                [row['geolocation_lat_seller'], row['geolocation_lng_seller']],
-                popup=f"Seller: {row['seller_city']}, {row['seller_state']}"
-            ).add_to(seller_cluster)
-        
-        return m
 
     # Generate the map with customer and seller geolocation data
-    geolocation_map = create_geolocation_map(data)
+    geolocation_map_customer = create_geolocation_map_customer(data)
     
     # Display the map using Streamlit Folium integration
-    st_folium(geolocation_map, width=700, height=500)
-    st.write(f"Only Display 10000 Customers Dataset")
+    st_folium(geolocation_map_customer, width=700, height=500)
+    st.write(f"Only Display 5000 Customers Dataset")
+    
+    # Generate the map with customer and seller geolocation data
+    geolocation_map_seller = create_geolocation_map_seller(data)
+    
+    # Display the map using Streamlit Folium integration
+    st_folium(geolocation_map_seller, width=700, height=500)
+    st.write(f"Only Display 5000 Seller Dataset")
 
     st.header("Payment Method by Customers")
     
@@ -176,8 +283,8 @@ with tab2:
     st.pyplot(payment_method_fig)
 
 
-# Tab 3: Product Insights
-with tab3:
+# Tab 4 : Product Insights
+with tab4:
     st.header("Product Flow (Shipped to Delivered)")
 
     def calculate_delivery_time(data):
@@ -206,16 +313,6 @@ with tab3:
 
     st.header("Best and Worst Performing Products")
 
-    def calculate_product_performance(data):
-        # Group by product and calculate total sales and number of purchases
-        product_performance = data.groupby('product_category_name_english').agg(
-            total_sales=pd.NamedAgg(column='payment_value', aggfunc='sum'),
-            total_orders=pd.NamedAgg(column='order_id', aggfunc='count')
-        ).reset_index()
-        return product_performance
-
-    performance_data = calculate_product_performance(filtered_data)
-    
     # Top 5 best performing products by total sales
     best_products = performance_data.sort_values(by='total_sales', ascending=False).head(5)
     st.subheader("Best Performing Products")

@@ -139,6 +139,54 @@ def calculate_top_sellers(data):
     
     return top_seller
 
+def analyze_delivery_efficiency(data):
+    # Convert to datetime if not already
+    data['order_purchase_timestamp'] = pd.to_datetime(data['order_approved_at'])
+    data['order_delivered_customer_date'] = pd.to_datetime(data['order_delivered_customer_date'])
+
+    # Filter for delivered orders and calculate the time taken
+    delivered_orders = data[data['order_status'] == 'delivered']
+    delivered_orders['delivery_duration'] = (delivered_orders['order_delivered_customer_date'] - delivered_orders['order_purchase_timestamp']).dt.days
+
+    # Summary statistics on delivery time
+    delivery_summary = delivered_orders['delivery_duration'].describe()
+
+    # Calculate min and max delivery durations
+    min_delivery_time = delivered_orders['delivery_duration'].min()
+    max_delivery_time = delivered_orders['delivery_duration'].max()
+
+    # Define efficiency thresholds (close to minimum is considered efficient)
+    threshold_min = min_delivery_time + (max_delivery_time - min_delivery_time) * 0.25  # Top 25% efficient
+    threshold_max = max_delivery_time - (max_delivery_time - min_delivery_time) * 0.25  # Bottom 25% inefficient
+
+    # Count the number of deliveries in each efficiency category
+    efficient_deliveries = delivered_orders[delivered_orders['delivery_duration'] <= threshold_min].shape[0]
+    inefficient_deliveries = delivered_orders[delivered_orders['delivery_duration'] >= threshold_max].shape[0]
+    total_deliveries = delivered_orders.shape[0]
+
+    # Calculate the efficiency percentages for efficient and inefficient deliveries
+    efficient_percentage = (efficient_deliveries / total_deliveries) * 100
+    inefficient_percentage = (inefficient_deliveries / total_deliveries) * 100
+
+    # General efficiency rates based on average delivery time
+    average_delivery_time = delivery_summary['mean']
+    general_efficient_deliveries = delivered_orders[delivered_orders['delivery_duration'] <= average_delivery_time].shape[0]
+    general_inefficient_deliveries = delivered_orders[delivered_orders['delivery_duration'] > average_delivery_time].shape[0]
+
+    # Calculate the general efficiency percentages
+    general_efficient_percentage = (general_efficient_deliveries / total_deliveries) * 100
+    general_inefficient_percentage = (general_inefficient_deliveries / total_deliveries) * 100
+    
+    return {
+        "total_deliveries": total_deliveries,
+        "efficient_deliveries": efficient_deliveries,
+        "inefficient_deliveries": inefficient_deliveries,
+        "efficient_percentage": efficient_percentage,
+        "inefficient_percentage": inefficient_percentage,
+        "general_efficient_percentage": general_efficient_percentage,
+        "general_inefficient_percentage": general_inefficient_percentage
+    }
+
 with tab1:
     # Streamlit section to display the results
     st.header('Highest Frequency on Buying Customer by City in our E-Commerce')
@@ -185,6 +233,78 @@ with tab1:
     plt.xticks(rotation=45)
     
     st.pyplot(fig)
+    
+    st.header('Product Shipment Flow Effectivity')
+    # Analyze delivery efficiency
+    analysis_results = analyze_delivery_efficiency(data)
+
+    # Display results in Streamlit
+    st.subheader("Delivery Efficiency Summary")
+    st.write(f"Total Deliveries: {analysis_results['total_deliveries']}")
+    st.write(f"Efficient Deliveries: {analysis_results['efficient_deliveries']} ({analysis_results['efficient_percentage']:.2f}%)")
+    st.write(f"Inefficient Deliveries: {analysis_results['inefficient_deliveries']} ({analysis_results['inefficient_percentage']:.2f}%)")
+    st.write(f"General Efficient Deliveries: {analysis_results['general_efficient_percentage']:.2f}%")
+    st.write(f"General Inefficient Deliveries: {analysis_results['general_inefficient_percentage']:.2f}%")
+
+    # Optional: Visualizing delivery efficiency
+    labels = ['Efficient Deliveries', 'Inefficient Deliveries']
+    sizes = [analysis_results['efficient_percentage'], analysis_results['inefficient_percentage']]
+    
+    fig, ax = plt.subplots()
+    ax.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=90, colors=['#66c2a5', '#fc8d62'])
+    ax.axis('equal')  # Equal aspect ratio ensures that pie is drawn as a circle.
+    
+    st.pyplot(fig)
+    
+    st.header('Most Payment Method Used')
+    payment_methods = data.groupby('payment_type').size().sort_values(ascending=False)
+
+    # Create pie chart
+    fig, ax = plt.subplots()
+    explode = [0.1 if i == payment_methods.idxmax() else 0 for i in payment_methods.index]
+
+    # Plot pie chart
+    ax.pie(payment_methods, labels=payment_methods.index, autopct='%1.1f%%', explode=explode, startangle=90, colors=plt.cm.tab20.colors)
+    ax.axis('equal')
+    plt.show()
+    
+    st.header('Customer Prime and Dead Time')
+    # Convert to datetime if not already
+    data['order_purchase_timestamp'] = pd.to_datetime(data['order_purchase_timestamp'])
+
+    # Extract hour from purchase timestamp
+    data['purchase_hour'] = data['order_purchase_timestamp'].dt.hour
+
+    # Group by hour to see purchase activity
+    purchase_activity = data.groupby('purchase_hour').size()
+
+    # Find the Prime Time (hour with the highest purchase activity)
+    prime_time_hour = purchase_activity.idxmax()
+    prime_time_count = purchase_activity.max()
+
+    # Find the Dead Time (hour with the lowest purchase activity)
+    dead_time_hour = purchase_activity.idxmin()
+    dead_time_count = purchase_activity.min()
+
+    # Set up the Streamlit app
+    st.subheader('Purchase Activity Analysis')
+
+    # Plotting purchase activity by hour
+    fig, ax = plt.subplots(figsize=(12, 6))
+    sns.lineplot(x=purchase_activity.index, y=purchase_activity.values, marker='o', ax=ax)
+    ax.set_title('Purchase Activity by Hour')
+    ax.set_xlabel('Hour of Day')
+    ax.set_ylabel('Number of Purchases')
+    ax.set_xticks(range(24))
+    ax.grid()
+
+    # Show the plot in Streamlit
+    st.pyplot(fig)
+
+    # Display the Prime Time and Dead Time
+    st.subheader('Purchase Activity Insights')
+    st.write(f"**Prime Time:** {prime_time_hour}:00 with {prime_time_count} purchases.")
+    st.write(f"**Dead Time:** {dead_time_hour}:00 with {dead_time_count} purchases.")
     
 
 # Tab 2 Content

@@ -140,17 +140,21 @@ def calculate_top_sellers(data):
 def calculate_monthly_growth(data):
     # Convert to datetime if not already
     data['order_purchase_timestamp'] = pd.to_datetime(data['order_purchase_timestamp'])
+    
+    # Extract year and month from purchase timestamp
     data['purchase_month'] = data['order_purchase_timestamp'].dt.to_period('M')
     
     # Group by month and count the number of orders
     purchase_growth = data.groupby('purchase_month').size()
-
+    
+    # Convert index to string format
+    purchase_growth.index = purchase_growth.index.astype(str)  # Convert Period to string
+    
     # Calculate the overall percentage growth or decline
     initial_orders = purchase_growth.iloc[0]  # Orders in the first month
-    final_orders = purchase_growth.iloc[-1]    # Orders in the last month
-
+    final_orders = purchase_growth.iloc[-1]   # Orders in the last month
     overall_percentage_change = ((final_orders - initial_orders) / initial_orders) * 100
-    
+
     return purchase_growth, overall_percentage_change
 
 def analyze_delivery_efficiency(data):
@@ -207,75 +211,8 @@ def analyze_delivery_efficiency(data):
         "general_inefficient_percentage": general_inefficient_percentage
     }
 
-with tab1:
-    # Streamlit section to display the results
-    st.header('Highest Frequency on Buying Customer by City in our E-Commerce')
-    st.subheader('Top 10 Cities with Highest Purchase Activity')
-
-    # Call the function and display the plot in Streamlit
-    fig_cities = plot_top_cities_by_purchase(data)
-    st.plotly_chart(fig_cities)
-    
-    st.header('Top Product and Top Seller in Our E-Commerce')
-    st.subheader('Top 5 Product')
-    
-    best_products = performance_data.sort_values(by='total_sales', ascending=False).head(5)
-    total_sales_all = performance_data['total_sales'].sum()
-    total_sales_best = best_products['total_sales'].sum()
-    total_sales_other = total_sales_all - total_sales_best
-    pie_data = pd.DataFrame({
-        'Category': list(best_products['product_category_name_english']) + ['Other'],
-        'Sales': list(best_products['total_sales']) + [total_sales_other]
-    })
-    fig = px.pie(pie_data, names='Category', values='Sales',
-                title='Top 5 Best-Performing Products vs Other Products',
-                hole=0.3)  # This creates a donut chart
-    st.plotly_chart(fig)
-    st.subheader("Top 10 Sellers by Total Sales")
-
-    top_sellers = calculate_top_sellers(data)
-
-    # Display results in Streamlit
-    st.subheader("Top 10 Sellers")
-    st.table(top_sellers)
-    
-    st.header('Product Shipment Flow Effectivity')
-    analysis_results = analyze_delivery_efficiency(data)
-
-    # Display results in Streamlit
-    st.subheader("Delivery Efficiency Summary")
-    st.write(f"Total Deliveries: {analysis_results['total_deliveries']}")
-    st.write(f"General Efficient Deliveries: {analysis_results['general_efficient_percentage']:.2f}%")
-    st.write(f"General Inefficient Deliveries: {analysis_results['general_inefficient_percentage']:.2f}%")
-
-    # Optional: Visualizing delivery efficiency
-    labels = ['Efficient Deliveries', 'Inefficient Deliveries']
-    sizes = [analysis_results['general_efficient_percentage'], analysis_results['general_inefficient_percentage']]
-
-    # Create an interactive pie chart for delivery efficiency
-    fig_efficiency = go.Figure(data=[go.Pie(labels=labels, values=sizes, hole=.3,
-                                            marker=dict(colors=['#66c2a5', '#fc8d62']),
-                                            textinfo='percent+label')])
-    fig_efficiency.update_layout(title_text='Delivery Efficiency Summary')
-    st.plotly_chart(fig_efficiency)
-
-    st.header('Most Payment Method Used')
-    payment_methods = data.groupby('payment_type').size().sort_values(ascending=False)
-
-    # Create an interactive pie chart for payment methods
-    explode = [0.1 if i == payment_methods.idxmax() else 0 for i in payment_methods.index]
-
-    fig_payment = go.Figure(data=[go.Pie(labels=payment_methods.index, 
-                                        values=payment_methods,
-                                        explode=explode,
-                                        hole=.3,
-                                        marker=dict(colors=plt.cm.tab20.colors),
-                                        textinfo='percent+label')])
-    fig_payment.update_layout(title_text='Most Used Payment Methods')
-    st.plotly_chart(fig_payment)
-    
-    st.header('Customer Prime and Dead Time')
-    # Convert to datetime if not already
+def analyze_purchase_activity(data):
+    # Convert 'order_purchase_timestamp' to datetime
     data['order_purchase_timestamp'] = pd.to_datetime(data['order_purchase_timestamp'])
 
     # Extract hour from purchase timestamp
@@ -292,23 +229,121 @@ with tab1:
     dead_time_hour = purchase_activity.idxmin()
     dead_time_count = purchase_activity.min()
 
+    return purchase_activity, prime_time_hour, prime_time_count, dead_time_hour, dead_time_count
+
+def analyze_prime_and_dead_time(data):
+    # Convert 'order_approved_at' to datetime
+    data['order_approved_at'] = pd.to_datetime(data['order_approved_at'])
+    
+    # Extract the hour from the order approval time
+    data['order_hour'] = data['order_approved_at'].dt.hour
+    
+    # Group by hour to find the count of orders for each hour
+    hourly_orders = data.groupby('order_hour').size()
+    
+    # Find prime time and dead time (e.g., most and least popular shopping hours)
+    prime_time = hourly_orders.idxmax()
+    dead_time = hourly_orders.idxmin()
+    
+    return hourly_orders, prime_time, dead_time
+
+with tab1:
+    # Streamlit section to display the results
+    st.header('Highest Frequency on Buying Customer by City in our E-Commerce')
+
+    # Call the function and display the plot in Streamlit
+    fig_cities = plot_top_cities_by_purchase(data)
+    st.plotly_chart(fig_cities)
+    
+    st.header('Top Product and Top Seller in Our E-Commerce')
+    
+    best_products = performance_data.sort_values(by='total_sales', ascending=False).head(5)
+    total_sales_all = performance_data['total_sales'].sum()
+    total_sales_best = best_products['total_sales'].sum()
+    total_sales_other = total_sales_all - total_sales_best
+    pie_data = pd.DataFrame({
+        'Category': list(best_products['product_category_name_english']) + ['Other'],
+        'Sales': list(best_products['total_sales']) + [total_sales_other]
+    })
+    fig = px.pie(pie_data, names='Category', values='Sales',
+                title='Top 5 Best-Performing Products vs Other Products',
+                hole=0.3)  # This creates a donut chart
+    st.plotly_chart(fig)
+    st.subheader("Top 10 Sellers by Total Sales")
+
+    top_sellers = calculate_top_sellers(data)
+    st.table(top_sellers)
+    
+    st.header('Product Shipment Flow Effectivity')
+    analysis_results = analyze_delivery_efficiency(data)
+
+
+    # Optional: Visualizing delivery efficiency
+    labels = ['Efficient Deliveries', 'Inefficient Deliveries']
+    sizes = [analysis_results['general_efficient_percentage'], analysis_results['general_inefficient_percentage']]
+
+    # Create an interactive pie chart for delivery efficiency
+    fig_efficiency = go.Figure(data=[go.Pie(labels=labels, values=sizes, hole=.3,
+                                            marker=dict(colors=['#66c2a5', '#fc8d62']),
+                                            textinfo='percent+label')])
+    fig_efficiency.update_layout(title_text='Delivery Efficiency Summary')
+    st.plotly_chart(fig_efficiency)
+
+    st.write(f"Total Deliveries: {analysis_results['total_deliveries']}")
+    st.write(f"General Efficient Deliveries: {analysis_results['general_efficient_percentage']:.2f}%")
+    st.write(f"General Inefficient Deliveries: {analysis_results['general_inefficient_percentage']:.2f}%")
+    
+    st.header('Most Payment Method Used')
+    payment_methods = data.groupby('payment_type').size().sort_values(ascending=False)
+
+    pull = [0.1 if payment_methods.index[i] == payment_methods.idxmax() else 0 for i in range(len(payment_methods))]
+
+    # Use a color palette for better visual appeal
+    colors = px.colors.qualitative.Set3  # A color set that works well with categorical data
+
+    fig_payment = go.Figure(data=[go.Pie(labels=payment_methods.index, 
+                                        values=payment_methods.values,
+                                        pull=pull,
+                                        hole=.3,
+                                        marker=dict(colors=colors),
+                                        textinfo='percent+label')])
+
+    fig_payment.update_layout(title_text='Most Used Payment Methods')
+    st.plotly_chart(fig_payment)
+    
+    st.header('Customer Prime and Dead Time')
+    purchase_activity, prime_time_hour, prime_time_count, dead_time_hour, dead_time_count = analyze_purchase_activity(data)
+
     # Set up the Streamlit app
-    st.subheader('Purchase Activity Analysis')
+    st.subheader('Purchase Activity Insights')
+    fig_activity = go.Figure()
 
-    # Plotting purchase activity by hour
-    fig, ax = plt.subplots(figsize=(12, 6))
-    sns.lineplot(x=purchase_activity.index, y=purchase_activity.values, marker='o', ax=ax)
-    ax.set_title('Purchase Activity by Hour')
-    ax.set_xlabel('Hour of Day')
-    ax.set_ylabel('Number of Purchases')
-    ax.set_xticks(range(24))
-    ax.grid()
+    # Add a line trace to the figure
+    fig_activity.add_trace(go.Scatter(
+        x=purchase_activity.index,
+        y=purchase_activity.values,
+        mode='lines+markers',
+        name='Number of Purchases',
+        line=dict(color='royalblue'),
+        marker=dict(size=8)
+    ))
 
-    # Show the plot in Streamlit
-    st.pyplot(fig)
+    # Update layout
+    fig_activity.update_layout(
+        title='Purchase Activity by Hour',
+        xaxis_title='Hour of Day',
+        yaxis_title='Number of Purchases',
+        xaxis=dict(
+            tickmode='linear',  # Ensures ticks are shown linearly
+            tickvals=list(range(24)),  # Ensure all hours (0-23) are shown
+        ),
+        template='plotly_white'  # Choose a clean layout template
+    )
+
+    # Show the interactive plot in Streamlit
+    st.plotly_chart(fig_activity)
 
     # Display the Prime Time and Dead Time
-    st.subheader('Purchase Activity Insights')
     st.write(f"**Prime Time:** {prime_time_hour}:00 with {prime_time_count} purchases.")
     st.write(f"**Dead Time:** {dead_time_hour}:00 with {dead_time_count} purchases.")
     
@@ -317,21 +352,33 @@ with tab1:
     # Set up the Streamlit app
     st.header('Monthly Purchase Growth Analysis')
 
-    # Plotting purchase growth over time
-    fig, ax = plt.subplots(figsize=(12, 6))
-    sns.lineplot(x=purchase_growth.index.astype(str), y=purchase_growth.values, marker='o', ax=ax)
-    ax.set_title('Growth of Purchases Over Time')
-    ax.set_xlabel('Month')
-    ax.set_ylabel('Number of Purchases')
+    # Create an interactive line plot
+    fig_growth = go.Figure()
 
-    # Set x-ticks and rotation
-    ax.set_xticks(range(len(purchase_growth.index)))  # Set positions for ticks
-    ax.set_xticklabels(purchase_growth.index.astype(str), rotation=45)  # Set the labels with rotation
+    # Add a line trace to the figure
+    fig_growth.add_trace(go.Scatter(
+        x=purchase_growth.index,
+        y=purchase_growth.values,
+        mode='lines+markers',
+        name='Number of Purchases',
+        line=dict(color='royalblue'),
+        marker=dict(size=8)
+    ))
 
-    ax.grid()
+    fig_growth.update_layout(
+        title='Growth of Purchases Over Time',
+        xaxis_title='',  # Leave the title blank to hide the title
+        yaxis_title='Number of Purchases',
+        xaxis=dict(
+            tickmode='linear',  # Ensures ticks are shown linearly
+            showticklabels=False,  # Hide x-axis labels
+        ),
+        xaxis_tickangle=-45,  # Rotate x-axis labels (will not be visible now)
+        template='plotly_white'  # Choose a clean layout template
+    )
 
-    # Show the plot in Streamlit
-    st.pyplot(fig)
+    # Show the interactive plot in Streamlit
+    st.plotly_chart(fig_growth)
 
     # Display overall purchase growth
     st.subheader('Overall Purchase Growth')
@@ -340,8 +387,7 @@ with tab1:
     st.subheader("Customer Geolocation")
     # Generate the map with customer and seller geolocation data
     geolocation_map_customer = create_geolocation_map_customer(data)
-    st.write("Here is the customer geolocation map:")
-    st_folium(geolocation_map_customer, width=700, height=500)
+    st_folium(geolocation_map_customer, width=700, height=500, key='data_key')
     
 
 # Tab 2 Content
@@ -374,22 +420,6 @@ with tab2:
 with tab3:
     st.header("Customer 'Prime Time' and 'Dead Time'")
     
-    def analyze_prime_and_dead_time(data):
-        # Convert 'order_approved_at' to datetime
-        data['order_approved_at'] = pd.to_datetime(data['order_approved_at'])
-        
-        # Extract the hour from the order approval time
-        data['order_hour'] = data['order_approved_at'].dt.hour
-        
-        # Group by hour to find the count of orders for each hour
-        hourly_orders = data.groupby('order_hour').size()
-        
-        # Find prime time and dead time (e.g., most and least popular shopping hours)
-        prime_time = hourly_orders.idxmax()
-        dead_time = hourly_orders.idxmin()
-        
-        return hourly_orders, prime_time, dead_time
-    
     # Analyze prime and dead times for shopping
     hourly_orders, prime_time, dead_time = analyze_prime_and_dead_time(data)
     
@@ -411,14 +441,14 @@ with tab3:
     geolocation_map_customer = create_geolocation_map_customer(data)
     
     # Display the map using Streamlit Folium integration
-    st_folium(geolocation_map_customer, width=700, height=500)
+    st_folium(geolocation_map_customer, width=700, height=500, key='customer_key')
     st.write(f"Only Display 5000 Customers Dataset")
     
     # Generate the map with customer and seller geolocation data
     geolocation_map_seller = create_geolocation_map_seller(data)
     
     # Display the map using Streamlit Folium integration
-    st_folium(geolocation_map_seller, width=700, height=500)
+    st_folium(geolocation_map_seller, width=700, height=500, key='seller_key')
     st.write(f"Only Display 5000 Seller Dataset")
 
     st.header("Payment Method by Customers")

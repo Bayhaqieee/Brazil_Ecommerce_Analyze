@@ -8,7 +8,7 @@ Check out the live version of the app here: [Bayhaqie Dashboard](https://eccomer
 
 ## Project Status
 
-🚧 **Status**: `Is_Complete`
+🚧 **Status**: `Completed!`
 
 ## Features
 
